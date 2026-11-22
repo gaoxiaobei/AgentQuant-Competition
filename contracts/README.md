@@ -51,3 +51,9 @@ npm --prefix apps/web run generate:api
 类型定义见 [contracts.py](../src/agentquant/contracts.py)、[sdk.py](../src/agentquant/sdk.py) 和 [evaluator.py](../src/agentquant/evaluator.py)。接口有变化时，提交模型、OpenAPI 快照、生成类型和受影响的测试。
 
 首轮演示只运行服务端内置策略，使用本地 SQLite 和人工数据。真实账号、策略 ZIP、沙箱、正式行情以及封榜评审排在后续迭代。
+
+## 数据接入交接
+
+数据工作包交付标准化数据包和版本清单。清单至少记录数据集 ID、模式版本、数据分区、覆盖交易日、可用时间口径、文件校验值和发布范围。训练和验证下载包与主办方评测快照按发布范围交付。供应方凭据保留在采集侧。
+
+赛务后端按数据集 ID 登记版本及授权信息。评测 Worker 按运行清单固定的数据集 ID 读取快照，校验版本和模式后交给评测器。前端通过业务 API 展示已授权的目录和下载入口。当前 [synthetic-v1.json](../src/agentquant/synthetic-v1.json) 可用于提前联调，真实数据包以评测输入模式和赛前数据规则验收。

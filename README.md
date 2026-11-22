@@ -37,7 +37,7 @@ uv run --locked python -m agentquant.demo
 uv run --locked pytest
 ```
 
-三个人分别负责 Web、赛务与运行、评测与数据。当前接口、首轮任务和联调验收见[开发计划](赛道2开发计划.md#三人小队开工)与[接口说明](contracts/README.md)。
+三个人分别负责 Web、赛务后端、评测与策略运行。数据接入是独立工作包，按版本交付数据集。当前接口、首轮任务和联调验收见[开发计划](赛道2开发计划.md#三人小队开工)与[接口说明](contracts/README.md)。
 
 ## 1. 赛题与参赛流程
 

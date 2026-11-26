@@ -77,7 +77,7 @@ class CompetitionSettings(Contract):
 class CompetitionState(Contract):
     id: str = COMPETITION_ID
     server_time: datetime
-    phase: Literal["unconfigured", "validation", "awaiting_freeze", "frozen", "official_ready", "evaluating"]
+    phase: Literal["unconfigured", "validation", "awaiting_freeze", "frozen", "official_ready", "evaluating", "published"]
     rules_version: str = RULES_VERSION
     settings: CompetitionSettings | None
 
@@ -171,6 +171,8 @@ def competition_state(db: Connection, now: datetime) -> CompetitionState:
         phase = "awaiting_freeze"
     elif now < settings.official_ready_at:
         phase = "frozen"
+    elif db.execute("SELECT 1 FROM leaderboards WHERE published_at IS NOT NULL").fetchone():
+        phase = "published"
     elif db.execute("SELECT 1 FROM official_batches").fetchone():
         phase = "evaluating"
     else:

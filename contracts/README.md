@@ -46,6 +46,14 @@
 3. 验证截止后，组织者调用 `POST /api/v1/admin/competitions/track-2/freeze`。队伍通过赛事的 `/freeze-receipt` 查回执。到截止时刻，新的验证任务和选择变更即时关闭。
 4. 到正式数据就绪时间后，组织者调用 `POST /api/v1/admin/official-runs` 创建批次。批次锁定独立样例的校验值，Worker 对每支已封榜队伍执行正式任务。组织者可以轮询批次，查询成功结果，带理由重跑失败任务。
 
+### 报告评审和榜单
+
+1. 已封榜队伍通过 `POST /api/v1/reports` 提交 `title` 和 `body`，每次生成新版本。组织者通过 `GET /api/v1/admin/reports` 查报告，并用 `POST /api/v1/admin/review-assignments` 将固定报告版本分配给评委。
+2. 评委通过 `GET /api/v1/reviews/assignments` 读取本人的任务，通过 `PUT /api/v1/reviews/{id}` 保存草稿或提交评分。第一次携带 `revision: 0`。提交时填写研究过程、反馈利用、效果、创新和复现五项分数，各为 0 至 100。
+3. 组织者通过 `POST /api/v1/admin/leaderboards` 生成待发布版本。每支冻结队伍的最新正式任务须成功，最新报告至少有一名评委且所有已分配评委均已提交。用 `POST /api/v1/admin/leaderboards/{id}/publish` 发布；报告或评分有变更时须重新生成。任何人可以通过赛事的 `/leaderboard` 读取已发布版本。
+
+联调量化分为将 `50 + 100 × 净收益率` 限定在 0 至 100。报告分为所有评委分项的平均值。两项按 `quant_weight_bps` 加权，按总分、净收益率、报告分降序排名，均相同则并列。各分数四舍五入至两位小数。此计分版本为 `demo-score-v1`，正式口径由组委会确认。
+
 调整路由和模型后，从仓库根目录更新契约，并在前端目录重新生成类型。
 
 ```powershell

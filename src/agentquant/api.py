@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 
-from . import accounts, competition
+from . import accounts, competition, reviews
 from .contracts import Catalog, CreateRun, CreateSubmission, ErrorResponse, EvaluationResult, Run, Submission
 from .demo_catalog import CATALOG, DATASET_ID, RULES_VERSION
 from .http import ApiError, Store, request_id
@@ -28,6 +28,7 @@ def create_app(
         app.state.jobs = JobStore(database if database is not None else local_database(), clock)
         accounts.initialize(app.state.jobs)
         competition.initialize(app.state.jobs)
+        reviews.initialize(app.state.jobs)
         app.state.clock = clock
         app.state.allow_demo = allow_demo if allow_demo is not None else os.getenv("AGENTQUANT_ALLOW_DEMO", "1") == "1"
         app.state.secure_cookie = (
@@ -41,6 +42,8 @@ def create_app(
                                                    409: {"model": ErrorResponse}})
     app.include_router(competition.router, responses={**auth_errors, 404: {"model": ErrorResponse},
                                                       409: {"model": ErrorResponse}})
+    app.include_router(reviews.router, responses={**auth_errors, 404: {"model": ErrorResponse},
+                                                  409: {"model": ErrorResponse}})
     prefix = "/api/v1"
     not_found = {**auth_errors, 404: {"model": ErrorResponse}}
 

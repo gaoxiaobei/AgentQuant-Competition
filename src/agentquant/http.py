@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 
 from .jobs import JobStore
 
@@ -27,3 +27,5 @@ def request_id(request: Request) -> str:
 
 
 Store = Annotated[JobStore, Depends(job_store)]
+
+IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=100)]

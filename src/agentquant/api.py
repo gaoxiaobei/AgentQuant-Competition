@@ -6,17 +6,16 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
 from uuid import UUID
 
-from fastapi import FastAPI, Header, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import accounts, competition, reviews
-from .contracts import Catalog, CreateRun, CreateSubmission, ErrorResponse, EvaluationResult, Run, Submission
+from . import accounts, competition, reviews, uploads
+from .contracts import BaselineSource, Catalog, CreateRun, CreateSubmission, ErrorResponse, EvaluationResult, Run, Submission
 from .demo_catalog import CATALOG, DATASET_ID, RULES_VERSION
-from .http import ApiError, Store, request_id
-from .jobs import IdempotencyConflict, JobStore, local_database
+from .http import ApiError, IdempotencyKey, Store, request_id
+from .jobs import ArchiveExecutionUnavailable, ArchiveUnavailable, IdempotencyConflict, JobStore, local_database
 
 
 def create_app(
@@ -29,6 +28,7 @@ def create_app(
         accounts.initialize(app.state.jobs)
         competition.initialize(app.state.jobs)
         reviews.initialize(app.state.jobs)
+        uploads.initialize(app.state.jobs)
         app.state.clock = clock
         app.state.allow_demo = allow_demo if allow_demo is not None else os.getenv("AGENTQUANT_ALLOW_DEMO", "1") == "1"
         app.state.secure_cookie = (
@@ -43,6 +43,8 @@ def create_app(
     app.include_router(competition.router, responses={**auth_errors, 404: {"model": ErrorResponse},
                                                       409: {"model": ErrorResponse}})
     app.include_router(reviews.router, responses={**auth_errors, 404: {"model": ErrorResponse},
+                                                  409: {"model": ErrorResponse}})
+    app.include_router(uploads.router, responses={**auth_errors, 404: {"model": ErrorResponse},
                                                   409: {"model": ErrorResponse}})
     prefix = "/api/v1"
     not_found = {**auth_errors, 404: {"model": ErrorResponse}}
@@ -67,17 +69,22 @@ def create_app(
     def create_submission(
         data: CreateSubmission, jobs: Store, team: accounts.ValidationTeam,
     ) -> Submission:
-        if data.source.baseline_id not in {entry.id for entry in CATALOG.baselines}:
+        if isinstance(data.source, BaselineSource) and data.source.baseline_id not in {
+            entry.id for entry in CATALOG.baselines
+        }:
             raise ApiError(404, "BASELINE_NOT_FOUND", "该示例策略不存在")
-        return jobs.create_submission(
-            data, team, authorize=lambda db, now: competition.check_validation(db, team, now),
-        )
+        try:
+            return jobs.create_submission(
+                data, team, authorize=lambda db, now: competition.check_validation(db, team, now),
+            )
+        except ArchiveUnavailable:
+            raise ApiError(404, "ARCHIVE_NOT_FOUND", "该策略包不存在或尚未完成校验") from None
 
     @app.post(f"{prefix}/runs", status_code=202, operation_id="createRun",
               responses={**not_found, 409: {"model": ErrorResponse}, 429: {"model": ErrorResponse}})
     def create_run(
         data: CreateRun, jobs: Store, team: accounts.ValidationTeam,
-        key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=100)],
+        key: IdempotencyKey,
     ) -> Run:
         if data.dataset_id != DATASET_ID:
             raise ApiError(404, "DATASET_NOT_FOUND", "该样例数据集不存在")
@@ -88,6 +95,8 @@ def create_app(
             )
         except IdempotencyConflict:
             raise ApiError(409, "IDEMPOTENCY_CONFLICT", "相同请求标识已用于不同的请求") from None
+        except ArchiveExecutionUnavailable:
+            raise ApiError(409, "STRATEGY_SMOKE_TEST_REQUIRED", "策略包尚未通过沙箱试运行") from None
         if run is None:
             raise ApiError(404, "SUBMISSION_NOT_FOUND", "该提交不存在")
         return run

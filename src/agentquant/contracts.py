@@ -19,14 +19,21 @@ class BaselineSource(Contract):
     baseline_id: Identifier
 
 
+class ArchiveSource(Contract):
+    kind: Literal["archive"]
+    upload_id: UUID
+
+
 class CreateSubmission(Contract):
     name: Title
-    source: BaselineSource
+    source: Annotated[BaselineSource | ArchiveSource, Field(discriminator="kind")]
 
 
 class Submission(CreateSubmission):
     id: UUID
     created_at: datetime
+    version: int | None = None
+    artifact_sha256: str | None = None
 
 
 class CreateRun(Contract):

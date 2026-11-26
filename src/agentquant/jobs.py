@@ -10,7 +10,7 @@ from pathlib import Path
 from time import time
 from uuid import UUID, uuid4
 
-from .contracts import CreateRun, CreateSubmission, EvaluationResult, Run, RunError, RunSpec, Submission
+from .contracts import ArchiveSource, CreateRun, CreateSubmission, EvaluationResult, Run, RunError, RunSpec, Submission
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS submissions (
@@ -38,6 +38,14 @@ CREATE TABLE IF NOT EXISTS runs (
 
 
 class IdempotencyConflict(Exception):
+    pass
+
+
+class ArchiveUnavailable(Exception):
+    pass
+
+
+class ArchiveExecutionUnavailable(Exception):
     pass
 
 
@@ -91,7 +99,24 @@ class JobStore:
             now = self.clock()
             if authorize is not None:
                 authorize(db, now)
-            item = Submission(**data.model_dump(), id=uuid4(), created_at=now)
+            checksum = None
+            if isinstance(data.source, ArchiveSource):
+                if not team_id:
+                    raise ArchiveUnavailable
+                upload = db.execute(
+                    """SELECT expected_sha256 FROM uploads
+                       WHERE id = ? AND team_id = ? AND completed_at IS NOT NULL""",
+                    (str(data.source.upload_id), team_id),
+                ).fetchone()
+                if upload is None:
+                    raise ArchiveUnavailable
+                checksum = upload["expected_sha256"]
+            version = None
+            if team_id:
+                version = db.execute("SELECT count(*) + 1 FROM submissions WHERE team_id = ?", (team_id,)).fetchone()[0]
+            item = Submission(
+                **data.model_dump(), id=uuid4(), created_at=now, version=version, artifact_sha256=checksum,
+            )
             db.execute(
                 "INSERT INTO submissions (id, record, team_id) VALUES (?, ?, ?)",
                 (str(item.id), item.model_dump_json(), team_id),
@@ -124,6 +149,8 @@ class JobStore:
             if row is None:
                 return None
             submission = Submission.model_validate_json(row["record"])
+            if isinstance(submission.source, ArchiveSource):
+                raise ArchiveExecutionUnavailable
             now = self.clock()
             if authorize is not None:
                 authorize(db, now)

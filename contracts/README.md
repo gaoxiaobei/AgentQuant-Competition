@@ -37,6 +37,15 @@
 {"submission_id":"2556983a-4687-41ef-be99-455e8f80a071","dataset_id":"synthetic-v1"}
 ```
 
+### 策略 ZIP 和提交版本
+
+1. 调用 `POST /api/v1/uploads` 登记 `size_bytes` 和小写十六进制 `sha256`。
+2. 以 `application/zip` 调用 `PUT /api/v1/uploads/{id}/content` 写入压缩包原始字节。服务端核验大小和校验值。
+3. 带 `Idempotency-Key` 调用 `POST /api/v1/uploads/{id}/complete` 做结构检查。同队同键同上传可重试。ZIP 须在根目录提供 `strategy.py`，压缩大小最多 2 MiB，解压大小最多 16 MiB，最多 128 个条目。
+4. 在 `POST /api/v1/submissions` 中用 `source: {"kind":"archive","upload_id":"…"}` 创建不可覆盖的提交。响应包含队内版本号和服务端核验过的校验值。只有本队可以查询上传或下载已校验文件。
+
+ZIP 目前可上传、校验和存档。沙箱试运行接入前，ZIP 提交发起验证或选择最终版本会返回 `STRATEGY_SMOKE_TEST_REQUIRED`。内置策略可走完整的验证和正式评测流程。
+
 ### 赛事日程和正式评测
 
 联调赛事 ID 为 `track-2`。组织者通过 `PUT /api/v1/admin/competitions/track-2` 一次性配置带时区的 `validation_deadline`、`official_ready_at`，以及 `daily_validation_limit` 和 `quant_weight_bps`。前端通过 `GET /api/v1/competitions/track-2` 读取服务器时间与阶段。验证额度按北京时间的自然日计算，赛事尚未配置时每队每日可创建 20 个任务。

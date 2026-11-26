@@ -10,7 +10,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import AwareDatetime, Field, model_validator
 
 from .accounts import Authenticated, require_role, require_team
-from .contracts import CatalogEntry, EvaluationResult, Run, RunSpec, Submission
+from .contracts import ArchiveSource, CatalogEntry, EvaluationResult, Run, RunSpec, Submission
 from .demo import load_dataset
 from .demo_catalog import CATALOG, DATASET_ID, OFFICIAL_DATASET_ID, RULES_VERSION, dataset_bytes
 from .http import ApiError, Store
@@ -248,10 +248,12 @@ def set_selection(competition_id: str, data: SelectionInput, current: Authentica
         now = request.app.state.clock()
         check_validation(db, team_id, now)
         submission = db.execute(
-            "SELECT 1 FROM submissions WHERE id = ? AND team_id = ?", (str(data.submission_id), team_id),
+            "SELECT record FROM submissions WHERE id = ? AND team_id = ?", (str(data.submission_id), team_id),
         ).fetchone()
         if submission is None:
             raise ApiError(404, "SUBMISSION_NOT_FOUND", "该提交不存在")
+        if isinstance(Submission.model_validate_json(submission["record"]).source, ArchiveSource):
+            raise ApiError(409, "STRATEGY_SMOKE_TEST_REQUIRED", "策略包尚未通过沙箱试运行")
         row = db.execute("SELECT revision FROM final_selections WHERE team_id = ?", (team_id,)).fetchone()
         revision = row["revision"] if row else 0
         if revision != data.revision:
@@ -282,6 +284,8 @@ def freeze(competition_id: str, current: Authenticated, request: Request, jobs: 
         ).fetchall()
         for row in rows:
             submission = Submission.model_validate_json(row["record"])
+            if isinstance(submission.source, ArchiveSource):
+                raise ApiError(409, "STRATEGY_SMOKE_TEST_REQUIRED", "策略包尚未通过沙箱试运行")
             receipt = FreezeReceipt(
                 team_id=row["team_id"], submission_id=submission.id, revision=row["revision"],
                 frozen_at=now, baseline_id=submission.source.baseline_id, rules_version=RULES_VERSION,

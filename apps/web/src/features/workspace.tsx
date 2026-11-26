@@ -52,10 +52,17 @@ export function Workspace() {
     },
     onSuccess: (run) => {
       writeLocal(validationStorageKey(scope, `recent.${run.submission_id}`), run.id)
-      queryClient.setQueryData(runQuery(scope, run.id).queryKey, run)
-      navigate(`/runs/${run.id}`)
     },
   })
+
+  function startValidation(item: Submission) {
+    start.mutate(item, {
+      onSuccess: (run) => {
+        queryClient.setQueryData(runQuery(scope, run.id).queryKey, run)
+        navigate(`/runs/${run.id}`)
+      },
+    })
+  }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -151,7 +158,7 @@ export function Workspace() {
                           {recent && <Link className="text-link" to={`/runs/${recent}`}>最近任务</Link>}
                           {source.kind === 'archive' ? <span className="muted">待沙箱试运行</span> : (
                             <button type="button" className="button secondary" disabled={!dataset || start.isPending}
-                              onClick={() => start.mutate(item)}>
+                              onClick={() => startValidation(item)}>
                               <Play size={14} aria-hidden="true" />{starting ? '正在发起…' : '发起验证'}
                             </button>
                           )}

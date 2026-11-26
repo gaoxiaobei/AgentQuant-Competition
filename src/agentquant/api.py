@@ -6,13 +6,26 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
 from . import accounts, competition, reviews, uploads
-from .contracts import BaselineSource, Catalog, CreateRun, CreateSubmission, ErrorResponse, EvaluationResult, Run, Submission
+from .contracts import (
+    BaselineSource,
+    Catalog,
+    CreateRun,
+    CreateSubmission,
+    EquityPoint,
+    ErrorResponse,
+    EvaluationResult,
+    Metrics,
+    Run,
+    Submission,
+    TradePage,
+)
 from .demo_catalog import CATALOG, DATASET_ID, RULES_VERSION
 from .http import ApiError, IdempotencyKey, Store, request_id
 from .jobs import ArchiveExecutionUnavailable, ArchiveUnavailable, IdempotencyConflict, JobStore, local_database
@@ -48,6 +61,7 @@ def create_app(
                                                   409: {"model": ErrorResponse}})
     prefix = "/api/v1"
     not_found = {**auth_errors, 404: {"model": ErrorResponse}}
+    result_errors = {**not_found, 409: {"model": ErrorResponse}}
 
     @app.exception_handler(ApiError)
     async def handle_error(request: Request, exc: ApiError) -> JSONResponse:
@@ -62,8 +76,12 @@ def create_app(
         return CATALOG
 
     @app.get(f"{prefix}/submissions", operation_id="listSubmissions", responses=auth_errors)
-    def submissions(jobs: Store, team: accounts.ValidationTeam) -> list[Submission]:
-        return jobs.list_submissions(team)
+    def submissions(
+        jobs: Store, team: accounts.ValidationTeam,
+        offset: Annotated[int, Query(ge=0, le=2**31 - 1)] = 0,
+        limit: Annotated[int | None, Query(ge=1, le=100)] = None,
+    ) -> list[Submission]:
+        return jobs.list_submissions(team, offset=offset, limit=limit)
 
     @app.post(f"{prefix}/submissions", status_code=201, operation_id="createSubmission", responses={**not_found, 409: {"model": ErrorResponse}})
     def create_submission(
@@ -108,8 +126,7 @@ def create_app(
             raise ApiError(404, "RUN_NOT_FOUND", "该验证任务不存在")
         return entry[0]
 
-    @app.get(f"{prefix}/runs/{{run_id}}/result", operation_id="getResult",
-             responses={**not_found, 409: {"model": ErrorResponse}})
+    @app.get(f"{prefix}/runs/{{run_id}}/result", operation_id="getResult", responses=result_errors)
     def run_result(run_id: UUID, jobs: Store, team: accounts.ValidationTeam) -> EvaluationResult:
         entry = jobs.get_run(run_id, team)
         if entry is None:
@@ -117,6 +134,23 @@ def create_app(
         if entry[1] is None:
             raise ApiError(409, "RESULT_UNAVAILABLE", "该任务暂无成功结果")
         return entry[1]
+
+    @app.get(f"{prefix}/runs/{{run_id}}/metrics", operation_id="getRunMetrics", responses=result_errors)
+    def run_metrics(run_id: UUID, jobs: Store, team: accounts.ValidationTeam) -> Metrics:
+        return run_result(run_id, jobs, team).metrics
+
+    @app.get(f"{prefix}/runs/{{run_id}}/equity", operation_id="getRunEquity", responses=result_errors)
+    def run_equity(run_id: UUID, jobs: Store, team: accounts.ValidationTeam) -> tuple[EquityPoint, ...]:
+        return run_result(run_id, jobs, team).equity
+
+    @app.get(f"{prefix}/runs/{{run_id}}/trades", operation_id="listRunTrades", responses=result_errors)
+    def run_trades(
+        run_id: UUID, jobs: Store, team: accounts.ValidationTeam,
+        offset: Annotated[int, Query(ge=0, le=2**31 - 1)] = 0,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    ) -> TradePage:
+        trades = run_result(run_id, jobs, team).trades
+        return TradePage(offset=offset, limit=limit, total=len(trades), items=trades[offset:offset + limit])
 
     return app
 

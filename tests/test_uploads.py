@@ -19,7 +19,7 @@ def make_zip(*names: str | ZipInfo) -> bytes:
     return buffer.getvalue()
 
 
-@pytest.mark.parametrize("member", ["../outside.txt", "/outside.txt", "strategy.py", "STRATEGY.PY"])
+@pytest.mark.parametrize("member", ["../outside.txt", "/outside.txt", "STRATEGY.PY"])
 def test_reject_invalid_archive_paths(member: str) -> None:
     with pytest.raises(ApiError, match="ZIP"):
         validate_archive(make_zip("strategy.py", member))

@@ -47,6 +47,7 @@ def test_team_session_and_resource_isolation(tmp_path: Path, sign_in) -> None:
         assert member.get(f"{url}/result").status_code == 200
         assert second.get(url).status_code == 404
         assert second.get(f"{url}/result").status_code == 404
+        assert second.get(f"{url}/trades").status_code == 404
         assert first.get("/api/v1/me").json()["id"] == identity["id"]
         assert first.post("/api/v1/auth/logout").status_code == 204
         assert first.get("/api/v1/me").status_code == 401

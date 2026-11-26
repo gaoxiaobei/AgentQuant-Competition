@@ -74,6 +74,13 @@ class Trade(Contract):
     fee: Decimal
 
 
+class TradePage(Contract):
+    offset: int
+    limit: int
+    total: int
+    items: tuple[Trade, ...]
+
+
 class EvaluationResult(Contract):
     metrics: Metrics
     equity: tuple[EquityPoint, ...]

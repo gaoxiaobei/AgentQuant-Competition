@@ -8,10 +8,11 @@
 | --- | --- | --- |
 | 查内置策略及数据 | `GET /api/v1/catalog` | `200` 目录 |
 | 创建提交 | `POST /api/v1/submissions` | `201` 提交 |
-| 查提交历史 | `GET /api/v1/submissions` | `200` 提交列表 |
+| 查提交历史 | `GET /api/v1/submissions`，可传 `offset`、`limit` | `200` 提交列表 |
 | 发起验证 | `POST /api/v1/runs`，带 `Idempotency-Key` | `202` 任务 |
 | 查任务状态 | `GET /api/v1/runs/{run_id}` | `200` 任务 |
-| 查净值和成交 | `GET /api/v1/runs/{run_id}/result` | `200` 结果。结果未就绪返回 `409`。 |
+| 查完整结果 | `GET /api/v1/runs/{run_id}/result` | `200` 结果。结果未就绪返回 `409`。 |
+| 分项查看结果 | `GET /api/v1/runs/{run_id}/metrics`、`/equity`、`/trades` | `200` 摘要、净值或成交。成交支持 `offset`、`limit`，响应包含 `total`。 |
 
 业务错误返回 `code` 与 `message`。请求字段校验采用 OpenAPI 中定义的 FastAPI `422` 结构。业务错误还包含 `request_id`，响应头返回 `X-Request-ID`。验证幂等键按队伍隔离，同队同键同参数返回相同任务，同队同键异参返回冲突。
 
@@ -74,7 +75,7 @@ npm --prefix apps/web run generate:api
 
 | 生产方 → 消费方 | 契约 |
 | --- | --- |
-| API → Worker | `RunSpec`，固定运行 ID、提交、数据、规则版本与种子。首轮策略引用是 `baseline_id`。 |
+| API → Worker | `RunSpec`，固定运行 ID、提交、数据、规则版本与种子。当前执行的策略引用为 `baseline_id`。正式运行同时固定数据校验值。 |
 | Worker → API | `EvaluationResult`，含摘要、逐日净值、成交。货币和比率为十进制字符串。完成时校验任务租约。 |
 | 数据 → 评测 | `Dataset`，首轮使用 [synthetic-v1.json](../src/agentquant/synthetic-v1.json)，含日期、决策时间、可见因子及成交参考数据。 |
 | 评测 → 策略 | `Snapshot` 和 `StrategyContext`。快照含当时可见的匿名因子、可选标的、现金和持仓。 |

@@ -123,10 +123,11 @@ class JobStore:
             )
         return item
 
-    def list_submissions(self, team_id: str = "") -> list[Submission]:
+    def list_submissions(self, team_id: str = "", *, offset: int = 0, limit: int | None = None) -> list[Submission]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT record FROM submissions WHERE team_id = ? ORDER BY rowid DESC", (team_id,),
+                "SELECT record FROM submissions WHERE team_id = ? ORDER BY rowid DESC LIMIT ? OFFSET ?",
+                (team_id, -1 if limit is None else limit, offset),
             ).fetchall()
         return [Submission.model_validate_json(row["record"]) for row in rows]
 
@@ -172,10 +173,10 @@ class JobStore:
         return run, result
 
     def claim(self, lease_seconds: float = 120) -> Claim | None:
-        now = time()
         token = str(uuid4())
         expired = RunError(code="LEASE_EXPIRED", message="评测进程中断，重试次数已用完")
-        with self.connect() as db:
+        with self.transaction() as db:
+            now = time()
             db.execute(
                 """UPDATE runs SET status = 'FAILED', error = ?, lease_token = NULL, lease_until = NULL
                    WHERE status = 'RUNNING' AND lease_until <= ? AND attempts >= 2""",
@@ -194,7 +195,7 @@ class JobStore:
 
     def finish(self, claim: Claim, outcome: EvaluationResult | RunError) -> bool:
         result = isinstance(outcome, EvaluationResult)
-        with self.connect() as db:
+        with self.transaction() as db:
             cursor = db.execute(
                 """UPDATE runs SET status = ?, result = ?, error = ?, lease_token = NULL, lease_until = NULL
                    WHERE id = ? AND status = 'RUNNING' AND lease_token = ? AND lease_until > ?""",

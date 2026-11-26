@@ -2,17 +2,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, Database, FilePlus2, History, Layers3, Play, TrendingUp } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import type { Catalog, Submission } from '../api'
 import { formatTime } from '../format'
 import { catalogQuery, runQuery, submissionsQuery } from '../queries'
-import { readLocal, writeLocal } from '../storage'
+import type { ValidationAccess } from '../session'
+import { readLocal, validationStorageKey, writeLocal } from '../storage'
 import { Feedback, Loading } from '../ui'
 
 export function Workspace() {
+  const { scope, csrf } = useOutletContext<ValidationAccess>()
   const catalog = useQuery(catalogQuery)
-  const submissions = useQuery(submissionsQuery)
+  const submissionsOptions = submissionsQuery(scope)
+  const submissions = useQuery(submissionsOptions)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
@@ -22,20 +25,20 @@ export function Workspace() {
   const dataset = selectedId(catalog.data?.datasets, datasetChoice)
   const requestKeys = useRef(new Map<string, string>())
   const save = useMutation({
-    mutationFn: () => api.submit({ name: name.trim(), source: { kind: 'baseline', baseline_id: baseline } }),
+    mutationFn: () => api.submit({ name: name.trim(), source: { kind: 'baseline', baseline_id: baseline } }, csrf),
     onSuccess: async () => {
       setName('')
-      await queryClient.invalidateQueries({ queryKey: submissionsQuery.queryKey })
+      await queryClient.invalidateQueries({ queryKey: submissionsOptions.queryKey })
     },
   })
   const start = useMutation({
     mutationFn: async (submission: Submission) => {
-      const storageKey = `request.${submission.id}.${dataset}`
+      const storageKey = validationStorageKey(scope, `request.${submission.id}.${dataset}`)
       const key = requestKeys.current.get(storageKey) ?? readLocal(storageKey) ?? newRequestKey()
       requestKeys.current.set(storageKey, key)
       writeLocal(storageKey, key)
       try {
-        const run = await api.start({ submission_id: submission.id, dataset_id: dataset }, key)
+        const run = await api.start({ submission_id: submission.id, dataset_id: dataset }, key, csrf)
         requestKeys.current.delete(storageKey)
         writeLocal(storageKey, null)
         return run
@@ -48,8 +51,8 @@ export function Workspace() {
       }
     },
     onSuccess: (run) => {
-      writeLocal(`recent.${run.submission_id}`, run.id)
-      queryClient.setQueryData(runQuery(run.id).queryKey, run)
+      writeLocal(validationStorageKey(scope, `recent.${run.submission_id}`), run.id)
+      queryClient.setQueryData(runQuery(scope, run.id).queryKey, run)
       navigate(`/runs/${run.id}`)
     },
   })
@@ -136,7 +139,7 @@ export function Workspace() {
               <tbody>
                 {submissions.data.map((item) => {
                   const source = item.source
-                  const recent = readLocal(`recent.${item.id}`)
+                  const recent = readLocal(validationStorageKey(scope, `recent.${item.id}`))
                   const starting = start.isPending && start.variables.id === item.id
                   return (
                     <tr key={item.id}>
@@ -146,10 +149,12 @@ export function Workspace() {
                       <td>
                         <div className="row-actions">
                           {recent && <Link className="text-link" to={`/runs/${recent}`}>最近任务</Link>}
-                          <button type="button" className="button secondary" disabled={!dataset || start.isPending}
-                            onClick={() => start.mutate(item)}>
-                            <Play size={14} aria-hidden="true" />{starting ? '正在发起…' : '发起验证'}
-                          </button>
+                          {source.kind === 'archive' ? <span className="muted">待沙箱试运行</span> : (
+                            <button type="button" className="button secondary" disabled={!dataset || start.isPending}
+                              onClick={() => start.mutate(item)}>
+                              <Play size={14} aria-hidden="true" />{starting ? '正在发起…' : '发起验证'}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

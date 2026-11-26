@@ -117,8 +117,16 @@ input:disabled, select:disabled { background: #f0f4f8; }
 .catalog-list code { color: var(--muted); }
 .identity-panel { max-width: 640px; }
 .identity-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
-.team-member { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 8px; background: #f0f5fa; }
-.team-member > svg { color: #225791; }
+.team-layout { display: grid; gap: 18px; }
+.team-layout > .workspace-grid { margin-top: 0; }
+.team-layout .panel-heading h2 { min-width: 0; overflow-wrap: anywhere; }
+.team-layout .panel-heading > div { min-width: 0; }
+.team-invite { margin-bottom: 15px; padding: 13px; border-radius: 8px; background: #eef6fa; }
+.team-invite code { display: block; margin: 4px 0; }
+.logout-button { margin-left: auto; flex-shrink: 0; }
+.account-link { overflow-wrap: anywhere; }
+.access-title { font-size: 1.3rem; }
+.identity-panel form { margin-top: 12px; }
 
 .history-panel, .trade-panel { margin-top: 18px; }
 .table-scroll { overflow: auto; }

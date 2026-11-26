@@ -14,3 +14,7 @@ export function writeLocal(key: string, value: string | null) {
     // Core API flows remain available when browser storage is blocked.
   }
 }
+
+export function validationStorageKey(scope: string, key: string) {
+  return scope === 'demo' ? key : `${scope}.${key}`
+}

@@ -1,19 +1,22 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { Activity, Database, LayoutDashboard, UsersRound } from 'lucide-react'
-import { lazy, Suspense, useLayoutEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { ApiError } from './api'
 import { CatalogPage } from './features/catalog'
-import { DemoLogin, DemoTeam } from './features/demo-team'
-import type { DemoSession } from './features/demo-team'
+import { LoginPage, RegisterPage } from './features/account'
+import { TeamPage } from './features/team'
+import { ValidationGate } from './features/validation-gate'
 import { Workspace } from './features/workspace'
-import { readLocal, writeLocal } from './storage'
+import { handleSessionError, recheckSession, sessionQuery, sessionChangeKey } from './session'
 import { Loading } from './ui'
 import './styles.css'
 
 const RunPage = lazy(() => import('./features/run'))
-const queryClient = new QueryClient({
+const queryClient: QueryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: (error) => handleSessionError(queryClient, error) }),
+  mutationCache: new MutationCache({ onError: (error) => handleSessionError(queryClient, error) }),
   defaultOptions: {
     queries: {
       retry: (count, error) => count < 1 && !(error instanceof ApiError && error.status < 500),
@@ -24,14 +27,18 @@ const queryClient = new QueryClient({
 
 function Layout() {
   const { pathname } = useLocation()
-  const [signedIn, setSignedIn] = useState(() => readLocal('demo-participant') === '1')
+  const session = useQuery(sessionQuery)
+  const identity = session.isSuccess && session.data.kind === 'authenticated' ? session.data.identity : undefined
 
-  function setDemoSession(value: boolean) {
-    writeLocal('demo-participant', value ? '1' : null)
-    setSignedIn(value)
-  }
+  useEffect(() => {
+    function onSessionChange(event: StorageEvent) {
+      if (event.key === sessionChangeKey) recheckSession(queryClient)
+    }
 
-  const session: DemoSession = { signedIn, setSignedIn: setDemoSession }
+    window.addEventListener('storage', onSessionChange)
+    return () => window.removeEventListener('storage', onSessionChange)
+  }, [])
+
   const previousPath = useRef(pathname)
   const main = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
@@ -59,11 +66,11 @@ function Layout() {
         <header className="topbar">
           <span>参赛工作台</span>
           <div className="topbar-actions">
-            <span className="badge demo-badge"><span />演示环境</span>
-            <Link className="text-link" to={signedIn ? '/team' : '/login'}>{signedIn ? '演示选手' : '演示登录'}</Link>
+            <span className="badge demo-badge"><span />人工行情</span>
+            <Link className="text-link account-link" to={identity ? '/team' : '/login'}>{identity?.username ?? '登录'}</Link>
           </div>
         </header>
-        <main id="main-content" ref={main} tabIndex={-1}><Outlet context={session} /></main>
+        <main id="main-content" ref={main} tabIndex={-1}><Outlet /></main>
       </div>
     </div>
   )
@@ -83,11 +90,14 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <Routes>
         <Route element={<Layout />}>
-          <Route index element={<Workspace />} />
+          <Route element={<ValidationGate />}>
+            <Route index element={<Workspace />} />
+            <Route path="runs/:runId" element={<Suspense fallback={<Loading>正在打开验证任务…</Loading>}><RunPage /></Suspense>} />
+          </Route>
           <Route path="data" element={<CatalogPage />} />
-          <Route path="login" element={<DemoLogin />} />
-          <Route path="team" element={<DemoTeam />} />
-          <Route path="runs/:runId" element={<Suspense fallback={<Loading>正在打开验证任务…</Loading>}><RunPage /></Suspense>} />
+          <Route path="login" element={<LoginPage />} />
+          <Route path="register" element={<RegisterPage />} />
+          <Route path="team" element={<TeamPage />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

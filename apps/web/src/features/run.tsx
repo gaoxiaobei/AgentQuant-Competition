@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, ChartNoAxesCombined, CircleAlert, Clock3, ReceiptText } from 'lucide-react'
 import { lazy, Suspense, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { api } from '../api'
+import { Link, useOutletContext, useParams } from 'react-router-dom'
 import type { Result, Run } from '../api'
 import { formatInteger, formatMoney, formatPercent, formatTime } from '../format'
-import { catalogQuery, isPending, runQuery, submissionsQuery } from '../queries'
+import { catalogQuery, isPending, resultQuery, runQuery, submissionsQuery } from '../queries'
+import type { ValidationAccess } from '../session'
 import { Feedback, Loading } from '../ui'
 
 const EquityChart = lazy(() => import('./equity-chart'))
@@ -18,18 +18,17 @@ const statuses: Record<Run['status'], string> = {
 const pageSize = 10
 
 export default function RunPage() {
+  const { scope } = useOutletContext<ValidationAccess>()
   const { runId = '' } = useParams()
   const run = useQuery({
-    ...runQuery(runId),
+    ...runQuery(scope, runId),
     refetchInterval: ({ state }) => !state.error && isPending(state.data) ? 2_000 : false,
   })
   const catalog = useQuery(catalogQuery)
-  const submissions = useQuery(submissionsQuery)
+  const submissions = useQuery(submissionsQuery(scope))
   const result = useQuery({
-    queryKey: ['runs', runId, 'result'],
-    queryFn: ({ signal }) => api.result(runId, signal),
+    ...resultQuery(scope, runId),
     enabled: run.data?.status === 'SUCCEEDED',
-    staleTime: Infinity,
   })
   const submissionName = submissions.data?.find((item) => item.id === run.data?.submission_id)?.name
   const datasetName = catalog.data?.datasets.find((item) => item.id === run.data?.dataset_id)?.name

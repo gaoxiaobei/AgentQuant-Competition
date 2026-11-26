@@ -4,7 +4,7 @@
 
 ## 本地开发
 
-当前可运行提交、验证任务和评测结果的联调骨架。API 与 Worker 通过同一个本地 SQLite 文件交接任务。Web 提供两支内置策略，评测使用四天人工行情。正式赛事规则与后续部署见下文。
+参赛工作台提供内置策略提交、历史记录、验证任务与结果查询。API 与 Worker 通过同一个本地 SQLite 文件交接任务，评测使用四天人工行情。正式赛事规则与后续部署见下文。
 
 准备 uv 和 Node.js 22.12 或更新版本。仓库设置默认 Python 3.12。在仓库根目录安装后端依赖。
 
@@ -22,13 +22,17 @@ uv run --locked uvicorn agentquant.api:app --reload
 uv run --locked python -m agentquant.worker
 ```
 
-第三个终端启动前端，打开终端给出的地址（默认 `http://localhost:5173`）。填写提交名称并保存，然后发起验证。API 调试页在 `http://127.0.0.1:8000/docs`。
+第三个终端启动前端，打开终端给出的地址（默认 `http://localhost:5173`）。填写提交名称并保存，然后从提交历史发起验证。结果页可刷新，最近任务可从发起验证的浏览器重新打开。API 调试页在 `http://127.0.0.1:8000/docs`。
 
 ```powershell
 Set-Location apps/web
 npm ci
 npm run dev
 ```
+
+右上角的「演示登录」可用于体验队伍页面。演示身份保存在当前浏览器，提交与验证仍由本地 API 共享。正式账号、队伍权限和策略包上传等待赛务接口交付。
+
+在仓库根目录运行 `npm --prefix apps/web run build` 生成生产构建。托管时将 `/api/` 转发到 FastAPI，并将其他前端路由交给 `index.html`，以支持直接打开验证结果页。
 
 在仓库根目录可单独运行因子排序基线及测试。
 

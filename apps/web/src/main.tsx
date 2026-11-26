@@ -1,11 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Activity, Database, LayoutDashboard } from 'lucide-react'
-import { lazy, Suspense, useLayoutEffect, useRef } from 'react'
+import { Activity, Database, LayoutDashboard, UsersRound } from 'lucide-react'
+import { lazy, Suspense, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { ApiError } from './api'
 import { CatalogPage } from './features/catalog'
+import { DemoLogin, DemoTeam } from './features/demo-team'
+import type { DemoSession } from './features/demo-team'
 import { Workspace } from './features/workspace'
+import { readLocal, writeLocal } from './storage'
 import { Loading } from './ui'
 import './styles.css'
 
@@ -21,6 +24,14 @@ const queryClient = new QueryClient({
 
 function Layout() {
   const { pathname } = useLocation()
+  const [signedIn, setSignedIn] = useState(() => readLocal('demo-participant') === '1')
+
+  function setDemoSession(value: boolean) {
+    writeLocal('demo-participant', value ? '1' : null)
+    setSignedIn(value)
+  }
+
+  const session: DemoSession = { signedIn, setSignedIn: setDemoSession }
   const previousPath = useRef(pathname)
   const main = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
@@ -41,14 +52,18 @@ function Layout() {
         <nav className="navigation" aria-label="主导航">
           <NavLink to="/" end><LayoutDashboard size={18} aria-hidden="true" />策略验证</NavLink>
           <NavLink to="/data"><Database size={18} aria-hidden="true" />数据目录</NavLink>
+          <NavLink to="/team"><UsersRound size={18} aria-hidden="true" />我的队伍</NavLink>
         </nav>
       </aside>
       <div className="content">
         <header className="topbar">
           <span>参赛工作台</span>
-          <span className="badge demo-badge"><span />演示环境</span>
+          <div className="topbar-actions">
+            <span className="badge demo-badge"><span />演示环境</span>
+            <Link className="text-link" to={signedIn ? '/team' : '/login'}>{signedIn ? '演示选手' : '演示登录'}</Link>
+          </div>
         </header>
-        <main id="main-content" ref={main} tabIndex={-1}><Outlet /></main>
+        <main id="main-content" ref={main} tabIndex={-1}><Outlet context={session} /></main>
       </div>
     </div>
   )
@@ -70,6 +85,8 @@ createRoot(document.getElementById('root')!).render(
         <Route element={<Layout />}>
           <Route index element={<Workspace />} />
           <Route path="data" element={<CatalogPage />} />
+          <Route path="login" element={<DemoLogin />} />
+          <Route path="team" element={<DemoTeam />} />
           <Route path="runs/:runId" element={<Suspense fallback={<Loading>正在打开验证任务…</Loading>}><RunPage /></Suspense>} />
           <Route path="*" element={<NotFound />} />
         </Route>

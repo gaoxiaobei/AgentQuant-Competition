@@ -132,15 +132,16 @@ export function Workspace() {
         {!!submissions.data?.length && (
           <div className="table-scroll" tabIndex={0} role="region" aria-label="提交历史">
             <table>
-              <thead><tr><th scope="col">提交名称</th><th scope="col">内置策略</th><th scope="col">提交时间（北京时间）</th><th scope="col">操作</th></tr></thead>
+              <thead><tr><th scope="col">提交名称</th><th scope="col">策略</th><th scope="col">提交时间（北京时间）</th><th scope="col">操作</th></tr></thead>
               <tbody>
                 {submissions.data.map((item) => {
+                  const source = item.source
                   const recent = readLocal(`recent.${item.id}`)
                   const starting = start.isPending && start.variables.id === item.id
                   return (
                     <tr key={item.id}>
                       <th scope="row" className="submission-name">{item.name}</th>
-                      <td>{baselineNames.get(item.source.baseline_id) ?? item.source.baseline_id}</td>
+                      <td>{source.kind === 'baseline' ? baselineNames.get(source.baseline_id) ?? source.baseline_id : '策略 ZIP'}</td>
                       <td><time dateTime={item.created_at}>{formatTime(item.created_at)}</time></td>
                       <td>
                         <div className="row-actions">

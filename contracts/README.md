@@ -37,6 +37,15 @@
 {"submission_id":"2556983a-4687-41ef-be99-455e8f80a071","dataset_id":"synthetic-v1"}
 ```
 
+### 赛事日程和正式评测
+
+联调赛事 ID 为 `track-2`。组织者通过 `PUT /api/v1/admin/competitions/track-2` 一次性配置带时区的 `validation_deadline`、`official_ready_at`，以及 `daily_validation_limit` 和 `quant_weight_bps`。前端通过 `GET /api/v1/competitions/track-2` 读取服务器时间与阶段。验证额度按北京时间的自然日计算，赛事尚未配置时每队每日可创建 20 个任务。
+
+1. 参赛队通过赛事的 `/datasets` 和 `/datasets/{id}/download` 下载验证样例。正式样例仅由 Worker 读取。
+2. 队长通过赛事的 `/final-selection` 选择本队提交，第一次携带 `revision: 0`。后续变更携带服务器返回的当前修订号。
+3. 验证截止后，组织者调用 `POST /api/v1/admin/competitions/track-2/freeze`。队伍通过赛事的 `/freeze-receipt` 查回执。到截止时刻，新的验证任务和选择变更即时关闭。
+4. 到正式数据就绪时间后，组织者调用 `POST /api/v1/admin/official-runs` 创建批次。批次锁定独立样例的校验值，Worker 对每支已封榜队伍执行正式任务。组织者可以轮询批次，查询成功结果，带理由重跑失败任务。
+
 调整路由和模型后，从仓库根目录更新契约，并在前端目录重新生成类型。
 
 ```powershell

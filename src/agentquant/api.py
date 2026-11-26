@@ -2,7 +2,9 @@
 
 import json
 import os
+from collections.abc import Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
@@ -10,7 +12,7 @@ from uuid import UUID
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 
-from . import accounts
+from . import accounts, competition
 from .contracts import Catalog, CreateRun, CreateSubmission, ErrorResponse, EvaluationResult, Run, Submission
 from .demo_catalog import CATALOG, DATASET_ID, RULES_VERSION
 from .http import ApiError, Store, request_id
@@ -19,11 +21,14 @@ from .jobs import IdempotencyConflict, JobStore, local_database
 
 def create_app(
     database: Path | None = None, *, allow_demo: bool | None = None, secure_cookie: bool | None = None,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.jobs = JobStore(database if database is not None else local_database())
+        app.state.jobs = JobStore(database if database is not None else local_database(), clock)
         accounts.initialize(app.state.jobs)
+        competition.initialize(app.state.jobs)
+        app.state.clock = clock
         app.state.allow_demo = allow_demo if allow_demo is not None else os.getenv("AGENTQUANT_ALLOW_DEMO", "1") == "1"
         app.state.secure_cookie = (
             secure_cookie if secure_cookie is not None else os.getenv("AGENTQUANT_SECURE_COOKIE", "0") == "1"
@@ -34,6 +39,8 @@ def create_app(
     app = FastAPI(title="AgentQuant", version="0.1.0", lifespan=lifespan)
     app.include_router(accounts.router, responses={**auth_errors, 404: {"model": ErrorResponse},
                                                    409: {"model": ErrorResponse}})
+    app.include_router(competition.router, responses={**auth_errors, 404: {"model": ErrorResponse},
+                                                      409: {"model": ErrorResponse}})
     prefix = "/api/v1"
     not_found = {**auth_errors, 404: {"model": ErrorResponse}}
 
@@ -53,14 +60,18 @@ def create_app(
     def submissions(jobs: Store, team: accounts.ValidationTeam) -> list[Submission]:
         return jobs.list_submissions(team)
 
-    @app.post(f"{prefix}/submissions", status_code=201, operation_id="createSubmission", responses=not_found)
-    def create_submission(data: CreateSubmission, jobs: Store, team: accounts.ValidationTeam) -> Submission:
+    @app.post(f"{prefix}/submissions", status_code=201, operation_id="createSubmission", responses={**not_found, 409: {"model": ErrorResponse}})
+    def create_submission(
+        data: CreateSubmission, jobs: Store, team: accounts.ValidationTeam,
+    ) -> Submission:
         if data.source.baseline_id not in {entry.id for entry in CATALOG.baselines}:
             raise ApiError(404, "BASELINE_NOT_FOUND", "该示例策略不存在")
-        return jobs.create_submission(data, team)
+        return jobs.create_submission(
+            data, team, authorize=lambda db, now: competition.check_validation(db, team, now),
+        )
 
     @app.post(f"{prefix}/runs", status_code=202, operation_id="createRun",
-              responses={**not_found, 409: {"model": ErrorResponse}})
+              responses={**not_found, 409: {"model": ErrorResponse}, 429: {"model": ErrorResponse}})
     def create_run(
         data: CreateRun, jobs: Store, team: accounts.ValidationTeam,
         key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=100)],
@@ -68,7 +79,10 @@ def create_app(
         if data.dataset_id != DATASET_ID:
             raise ApiError(404, "DATASET_NOT_FOUND", "该样例数据集不存在")
         try:
-            run = jobs.create_run(data, key, RULES_VERSION, team)
+            run = jobs.create_run(
+                data, key, RULES_VERSION, team,
+                authorize=lambda db, now: competition.check_validation(db, team, now, quota=True),
+            )
         except IdempotencyConflict:
             raise ApiError(409, "IDEMPOTENCY_CONFLICT", "相同请求标识已用于不同的请求") from None
         if run is None:

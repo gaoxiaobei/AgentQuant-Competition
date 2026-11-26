@@ -41,6 +41,8 @@ class RunSpec(Contract):
     dataset_id: Identifier
     rules_version: Identifier
     seed: int = 0
+    kind: Literal["validation", "official"] = "validation"
+    dataset_sha256: str | None = None
 
 
 class Metrics(Contract):
@@ -88,6 +90,7 @@ class Run(Contract):
     status: RunStatus
     created_at: datetime
     error: RunError | None = None
+    kind: Literal["validation", "official"] = "validation"
 
 
 class CatalogEntry(Contract):

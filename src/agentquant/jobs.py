@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -47,8 +48,9 @@ class Claim:
 
 
 class JobStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, clock: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
         self.path = path
+        self.clock = clock
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.transaction() as db:
             for statement in SCHEMA.strip().rstrip(";").split(";"):
@@ -81,9 +83,15 @@ class JobStore:
             db.execute("BEGIN IMMEDIATE")
             yield db
 
-    def create_submission(self, data: CreateSubmission, team_id: str = "") -> Submission:
-        item = Submission(**data.model_dump(), id=uuid4(), created_at=datetime.now(UTC))
-        with self.connect() as db:
+    def create_submission(
+        self, data: CreateSubmission, team_id: str = "", *,
+        authorize: Callable[[sqlite3.Connection, datetime], None] | None = None,
+    ) -> Submission:
+        with self.transaction() as db:
+            now = self.clock()
+            if authorize is not None:
+                authorize(db, now)
+            item = Submission(**data.model_dump(), id=uuid4(), created_at=now)
             db.execute(
                 "INSERT INTO submissions (id, record, team_id) VALUES (?, ?, ?)",
                 (str(item.id), item.model_dump_json(), team_id),
@@ -97,7 +105,10 @@ class JobStore:
             ).fetchall()
         return [Submission.model_validate_json(row["record"]) for row in rows]
 
-    def create_run(self, data: CreateRun, key: str, rules_version: str, team_id: str = "") -> Run | None:
+    def create_run(
+        self, data: CreateRun, key: str, rules_version: str, team_id: str = "", *,
+        authorize: Callable[[sqlite3.Connection, datetime], None] | None = None,
+    ) -> Run | None:
         with self.transaction() as db:
             previous = db.execute(
                 "SELECT * FROM runs WHERE team_id = ? AND idempotency_key = ?", (team_id, key),
@@ -113,29 +124,25 @@ class JobStore:
             if row is None:
                 return None
             submission = Submission.model_validate_json(row["record"])
-            run_id = uuid4()
+            now = self.clock()
+            if authorize is not None:
+                authorize(db, now)
             spec = RunSpec(
-                run_id=run_id, submission_id=submission.id, dataset_id=data.dataset_id,
+                run_id=uuid4(), submission_id=submission.id, dataset_id=data.dataset_id,
                 baseline_id=submission.source.baseline_id, rules_version=rules_version,
             )
-            now = datetime.now(UTC)
-            db.execute(
-                """INSERT INTO runs (id, submission_id, idempotency_key, request, spec, status, created_at, team_id)
-                   VALUES (?, ?, ?, ?, ?, 'QUEUED', ?, ?)""",
-                (str(run_id), str(submission.id), key, data.model_dump_json(), spec.model_dump_json(), now.isoformat(), team_id),
-            )
-        return Run(
-            id=run_id, submission_id=submission.id, dataset_id=data.dataset_id,
-            rules_version=rules_version, status="QUEUED", created_at=now,
-        )
+            return enqueue(db, spec, team_id, key, now)
 
     def get_run(self, run_id: UUID, team_id: str = "") -> tuple[Run, EvaluationResult | None] | None:
         with self.connect() as db:
             row = db.execute("SELECT * FROM runs WHERE id = ? AND team_id = ?", (str(run_id), team_id)).fetchone()
         if row is None:
             return None
+        run = read_run(row)
+        if run.kind != "validation":
+            return None
         result = EvaluationResult.model_validate_json(row["result"]) if row["result"] else None
-        return read_run(row), result
+        return run, result
 
     def claim(self, lease_seconds: float = 120) -> Claim | None:
         now = time()
@@ -172,11 +179,26 @@ class JobStore:
             return cursor.rowcount == 1
 
 
+def enqueue(db: sqlite3.Connection, spec: RunSpec, team_id: str, key: str, now: datetime) -> Run:
+    now = now.astimezone(UTC)
+    data = CreateRun(submission_id=spec.submission_id, dataset_id=spec.dataset_id)
+    db.execute(
+        """INSERT INTO runs (id, submission_id, idempotency_key, request, spec, status, created_at, team_id)
+           VALUES (?, ?, ?, ?, ?, 'QUEUED', ?, ?)""",
+        (str(spec.run_id), str(spec.submission_id), key, data.model_dump_json(),
+         spec.model_dump_json(), now.isoformat(), team_id),
+    )
+    return Run(
+        id=spec.run_id, submission_id=spec.submission_id, dataset_id=spec.dataset_id,
+        rules_version=spec.rules_version, status="QUEUED", created_at=now, kind=spec.kind,
+    )
+
+
 def read_run(row: sqlite3.Row) -> Run:
     spec = RunSpec.model_validate_json(row["spec"])
     return Run(
         id=spec.run_id, submission_id=spec.submission_id, dataset_id=spec.dataset_id,
-        rules_version=spec.rules_version, status=row["status"], created_at=row["created_at"],
+        rules_version=spec.rules_version, status=row["status"], created_at=row["created_at"], kind=spec.kind,
         error=RunError.model_validate_json(row["error"]) if row["error"] else None,
     )
 

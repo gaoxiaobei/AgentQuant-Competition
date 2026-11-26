@@ -76,6 +76,10 @@ class RunError(Contract):
     message: str
 
 
+class ErrorResponse(RunError):
+    request_id: UUID
+
+
 class Run(Contract):
     id: UUID
     submission_id: UUID

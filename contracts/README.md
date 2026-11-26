@@ -1,4 +1,4 @@
-# 首轮联调接口
+# 后端接口
 
 ## HTTP
 
@@ -13,7 +13,17 @@
 | 查任务状态 | `GET /api/v1/runs/{run_id}` | `200` 任务 |
 | 查净值和成交 | `GET /api/v1/runs/{run_id}/result` | `200` 结果。结果未就绪返回 `409`。 |
 
-业务错误返回 `code` 与 `message`。请求字段校验采用 OpenAPI 中定义的 FastAPI `422` 结构。验证的幂等键在本地数据库内唯一，同键同参数返回相同任务，同键异参返回冲突。接入认证后应把幂等键范围收敛到队伍。
+业务错误返回 `code` 与 `message`。请求字段校验采用 OpenAPI 中定义的 FastAPI `422` 结构。业务错误还包含 `request_id`，响应头返回 `X-Request-ID`。验证幂等键按队伍隔离，同队同键同参数返回相同任务，同队同键异参返回冲突。
+
+### 登录与组队
+
+组织者在 API 使用的数据库上运行 `uv run --locked python -m agentquant.accounts participant`，生成 24 小时内有效的一次性注册邀请码。命令也接受 `organizer` 和 `reviewer`。
+
+1. 通过 `POST /api/v1/auth/register` 提交 `username`、`password` 和 `invite_code`。
+2. 通过 `POST /api/v1/auth/login` 提交账号密码，保留响应设置的会话 Cookie。响应或 `GET /api/v1/me` 提供 `csrf_token`。已登录的写请求带上 `X-CSRF-Token`。
+3. 通过 `POST /api/v1/teams` 创建队伍并取得组队码。队友通过 `POST /api/v1/teams/join` 加入，队内成员通过 `GET /api/v1/teams/{id}` 查看成员。使用 `POST /api/v1/auth/logout` 退出。
+
+设置 `AGENTQUANT_ALLOW_DEMO=0` 要求登录及组队后才能访问提交和验证接口。默认的匿名样例使用独立的数据范围。HTTPS 环境设置 `AGENTQUANT_SECURE_COOKIE=1`。
 
 内置策略提交请求示例。
 
@@ -50,7 +60,7 @@ npm --prefix apps/web run generate:api
 
 类型定义见 [contracts.py](../src/agentquant/contracts.py)、[sdk.py](../src/agentquant/sdk.py) 和 [evaluator.py](../src/agentquant/evaluator.py)。接口有变化时，提交模型、OpenAPI 快照、生成类型和受影响的测试。
 
-首轮演示只运行服务端内置策略，使用本地 SQLite 和人工数据。真实账号、策略 ZIP、沙箱、正式行情以及封榜评审排在后续迭代。
+联调使用本地 SQLite 和人工数据，Worker 运行服务端内置策略。
 
 ## 数据接入交接
 

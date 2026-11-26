@@ -60,7 +60,9 @@ ZIP 目前可上传、校验和存档。沙箱试运行接入前，ZIP 提交发
 
 1. 已封榜队伍通过 `POST /api/v1/reports` 提交 `title` 和 `body`，每次生成新版本。组织者通过 `GET /api/v1/admin/reports` 查报告，并用 `POST /api/v1/admin/review-assignments` 将固定报告版本分配给评委。
 2. 评委通过 `GET /api/v1/reviews/assignments` 读取本人的任务，通过 `PUT /api/v1/reviews/{id}` 保存草稿或提交评分。第一次携带 `revision: 0`。提交时填写研究过程、反馈利用、效果、创新和复现五项分数，各为 0 至 100。
-3. 组织者通过 `POST /api/v1/admin/leaderboards` 生成待发布版本。每支冻结队伍的最新正式任务须成功，最新报告至少有一名评委且所有已分配评委均已提交。用 `POST /api/v1/admin/leaderboards/{id}/publish` 发布；报告或评分有变更时须重新生成。任何人可以通过赛事的 `/leaderboard` 读取已发布版本。
+3. 组织者通过 `POST /api/v1/admin/leaderboards` 生成待发布版本。参与排名的队伍须有成功的最新正式任务，最新报告至少有一名评委且所有已分配评委均已提交。用 `POST /api/v1/admin/leaderboards/{id}/publish` 发布；报告或评分有变更时须重新生成。任何人可以通过赛事的 `/leaderboard` 读取已发布版本。
+
+如队伍缺交报告，或最新一次正式评测已失败且无需继续重跑，组织者应在发榜前调用 `PUT /api/v1/admin/runs/{run_id}/leaderboard-exclusion`，提交 `status` 和 `reason`。评测成功且无报告时使用 `REPORT_MISSING`，评测失败时使用 `OFFICIAL_RUN_FAILED`。理由与操作者留在审计记录中。公开榜单在 `unranked` 中显示队名和状态，该队无排名及总分。队伍补交报告后进入正常评审流程，同队再次重跑后按最新任务判断。发榜后确认记录与正式批次锁定。
 
 联调量化分为将 `50 + 100 × 净收益率` 限定在 0 至 100。报告分为所有评委分项的平均值。两项按 `quant_weight_bps` 加权，按总分、净收益率、报告分降序排名，均相同则并列。各分数四舍五入至两位小数。此计分版本为 `demo-score-v1`，正式口径由组委会确认。
 

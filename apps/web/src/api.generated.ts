@@ -397,6 +397,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/runs/{run_id}/leaderboard-exclusion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Record Exclusion */
+        put: operations["recordLeaderboardExclusion"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/leaderboards": {
         parameters: {
             query?: never;
@@ -849,6 +866,41 @@ export interface components {
             /** Trades */
             trades: components["schemas"]["Trade"][];
         };
+        /** ExclusionDecision */
+        ExclusionDecision: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "REPORT_MISSING" | "OFFICIAL_RUN_FAILED";
+            /** Reason */
+            reason: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+            /**
+             * Decided At
+             * Format: date-time
+             */
+            decided_at: string;
+        };
+        /** ExclusionInput */
+        ExclusionInput: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "REPORT_MISSING" | "OFFICIAL_RUN_FAILED";
+            /** Reason */
+            reason: string;
+        };
         /** FreezeReceipt */
         FreezeReceipt: {
             /**
@@ -945,6 +997,8 @@ export interface components {
             rubric_version: string;
             /** Entries */
             entries: components["schemas"]["Standing"][];
+            /** Unranked */
+            unranked?: components["schemas"]["UnrankedTeam"][];
             /**
              * Id
              * Format: uuid
@@ -1273,6 +1327,21 @@ export interface components {
             total: number;
             /** Items */
             items: components["schemas"]["Trade"][];
+        };
+        /** UnrankedTeam */
+        UnrankedTeam: {
+            /**
+             * Team Id
+             * Format: uuid
+             */
+            team_id: string;
+            /** Team Name */
+            team_name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "REPORT_MISSING" | "OFFICIAL_RUN_FAILED";
         };
         /** Upload */
         Upload: {
@@ -3012,6 +3081,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Review"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recordLeaderboardExclusion: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExclusionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExclusionDecision"];
                 };
             };
             /** @description Unauthorized */

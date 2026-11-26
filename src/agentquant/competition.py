@@ -398,6 +398,8 @@ def retry(run_id: UUID, data: RetryInput, current: Authenticated, request: Reque
             return OfficialRun(team_id=previous["team_id"], attempt=attempt, run=read_run(existing))
         if previous["status"] != "FAILED":
             raise ApiError(409, "RETRY_NOT_ALLOWED", "仅失败的正式任务可重跑")
+        if db.execute("SELECT 1 FROM leaderboards WHERE published_at IS NOT NULL").fetchone():
+            raise ApiError(409, "LEADERBOARD_LOCKED", "榜单已发布，正式评测已锁定")
         spec = RunSpec.model_validate_json(previous["spec"]).model_copy(update={"run_id": uuid4()})
         now = request.app.state.clock()
         run = enqueue(db, spec, previous["team_id"], str(uuid4()), now)

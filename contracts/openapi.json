@@ -2518,6 +2518,120 @@
         }
       }
     },
+    "/api/v1/admin/runs/{run_id}/leaderboard-exclusion": {
+      "put": {
+        "tags": [
+          "reviews and leaderboard"
+        ],
+        "summary": "Record Exclusion",
+        "operationId": "recordLeaderboardExclusion",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExclusionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExclusionDecision"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/leaderboards": {
       "post": {
         "tags": [
@@ -4650,6 +4764,74 @@
         ],
         "title": "EvaluationResult"
       },
+      "ExclusionDecision": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "REPORT_MISSING",
+              "OFFICIAL_RUN_FAILED"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Team Id"
+          },
+          "decided_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Decided At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "reason",
+          "run_id",
+          "team_id",
+          "decided_at"
+        ],
+        "title": "ExclusionDecision"
+      },
+      "ExclusionInput": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "REPORT_MISSING",
+              "OFFICIAL_RUN_FAILED"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "reason"
+        ],
+        "title": "ExclusionInput"
+      },
       "FreezeReceipt": {
         "properties": {
           "submission_id": {
@@ -4832,6 +5014,13 @@
             },
             "type": "array",
             "title": "Entries"
+          },
+          "unranked": {
+            "items": {
+              "$ref": "#/components/schemas/UnrankedTeam"
+            },
+            "type": "array",
+            "title": "Unranked"
           },
           "id": {
             "type": "string",
@@ -5627,6 +5816,35 @@
           "items"
         ],
         "title": "TradePage"
+      },
+      "UnrankedTeam": {
+        "properties": {
+          "team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Team Id"
+          },
+          "team_name": {
+            "type": "string",
+            "title": "Team Name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "REPORT_MISSING",
+              "OFFICIAL_RUN_FAILED"
+            ],
+            "title": "Status"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "team_id",
+          "team_name",
+          "status"
+        ],
+        "title": "UnrankedTeam"
       },
       "Upload": {
         "properties": {

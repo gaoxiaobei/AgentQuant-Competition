@@ -3,7 +3,7 @@
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from hashlib import sha256
-from sqlite3 import Connection
+from sqlite3 import Connection, Row
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
@@ -42,6 +42,12 @@ CREATE TABLE IF NOT EXISTS review_versions (
     record TEXT NOT NULL,
     PRIMARY KEY (assignment_id, revision)
 );
+CREATE TABLE IF NOT EXISTS leaderboard_exclusions (
+    run_id TEXT PRIMARY KEY REFERENCES official_runs(run_id),
+    status TEXT NOT NULL CHECK (status IN ('REPORT_MISSING', 'OFFICIAL_RUN_FAILED')),
+    reason TEXT NOT NULL,
+    decided_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS leaderboards (
     id TEXT PRIMARY KEY,
     fingerprint TEXT NOT NULL UNIQUE,
@@ -54,6 +60,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS leaderboard_published ON leaderboards((1)) WHE
 
 ReportBody = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50_000)]
 Score = Annotated[int, Field(strict=True, ge=0, le=100)]
+ExclusionStatus = Literal["REPORT_MISSING", "OFFICIAL_RUN_FAILED"]
 
 
 class ReportInput(Contract):
@@ -116,6 +123,23 @@ class Standing(Contract):
     total_score: Decimal
 
 
+class ExclusionInput(Contract):
+    status: ExclusionStatus
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class ExclusionDecision(ExclusionInput):
+    run_id: UUID
+    team_id: UUID
+    decided_at: datetime
+
+
+class UnrankedTeam(Contract):
+    team_id: UUID
+    team_name: str
+    status: ExclusionStatus
+
+
 class LeaderboardSnapshot(Contract):
     competition_id: str = COMPETITION_ID
     batch_id: UUID
@@ -123,6 +147,7 @@ class LeaderboardSnapshot(Contract):
     scoring_version: str = SCORING_VERSION
     rubric_version: str = RUBRIC_VERSION
     entries: list[Standing]
+    unranked: list[UnrankedTeam] = Field(default_factory=list)
 
 
 class Leaderboard(LeaderboardSnapshot):
@@ -253,18 +278,65 @@ def points(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def score_entry(db: Connection, team, batch_id: str, weight: int) -> tuple[Standing, list[str]]:
-    team_id = team["id"]
-    run = db.execute(
+def latest_official_run(db: Connection, batch_id: str, team_id: str) -> Row | None:
+    return db.execute(
         """SELECT r.id, r.status, r.result FROM official_runs o JOIN runs r ON r.id = o.run_id
            WHERE o.batch_id = ? AND o.team_id = ? ORDER BY o.attempt DESC LIMIT 1""",
         (batch_id, team_id),
     ).fetchone()
-    if run is None or run["status"] != "SUCCEEDED":
-        raise ApiError(409, "OFFICIAL_RUNS_INCOMPLETE", "全部冻结队伍需要完成正式评测")
-    report = db.execute("SELECT id FROM reports WHERE team_id = ? ORDER BY version DESC LIMIT 1", (team_id,)).fetchone()
-    if report is None:
-        raise ApiError(409, "REPORTS_INCOMPLETE", "全部冻结队伍需要提交报告")
+
+
+def latest_report(db: Connection, team_id: str) -> Row | None:
+    return db.execute("SELECT id FROM reports WHERE team_id = ? ORDER BY version DESC LIMIT 1", (team_id,)).fetchone()
+
+
+def confirmed_exclusion(db: Connection, run_id: str, status: ExclusionStatus) -> bool:
+    return db.execute(
+        "SELECT 1 FROM leaderboard_exclusions WHERE run_id = ? AND status = ?", (run_id, status),
+    ).fetchone() is not None
+
+
+@router.put("/admin/runs/{run_id}/leaderboard-exclusion", operation_id="recordLeaderboardExclusion")
+def record_exclusion(
+    run_id: UUID, data: ExclusionInput, current: Authenticated, request: Request, jobs: Store,
+) -> ExclusionDecision:
+    organizer = require_role(current, "organizer")
+    with jobs.transaction() as db:
+        require_unpublished(db)
+        official = db.execute(
+            "SELECT batch_id, team_id FROM official_runs WHERE run_id = ?", (str(run_id),),
+        ).fetchone()
+        if official is None:
+            raise ApiError(404, "RUN_NOT_FOUND", "该正式任务不存在")
+        team_id = official["team_id"]
+        run = latest_official_run(db, official["batch_id"], team_id)
+        if run is None or run["id"] != str(run_id):
+            raise ApiError(409, "OFFICIAL_RUN_SUPERSEDED", "请使用本队最新正式任务登记不排名状态")
+        if run["status"] == "FAILED":
+            eligible_status = "OFFICIAL_RUN_FAILED"
+        elif run["status"] == "SUCCEEDED" and latest_report(db, team_id) is None:
+            eligible_status = "REPORT_MISSING"
+        else:
+            eligible_status = None
+        if eligible_status != data.status:
+            raise ApiError(409, "EXCLUSION_NOT_ALLOWED", "本队当前评测及报告状态不符合该不排名原因")
+        previous = db.execute(
+            "SELECT * FROM leaderboard_exclusions WHERE run_id = ?", (str(run_id),),
+        ).fetchone()
+        if previous:
+            if previous["status"] != data.status or previous["reason"] != data.reason:
+                raise ApiError(409, "EXCLUSION_ALREADY_RECORDED", "该正式任务已有不排名记录")
+            return ExclusionDecision(team_id=team_id, **dict(previous))
+        now = request.app.state.clock()
+        db.execute(
+            "INSERT INTO leaderboard_exclusions (run_id, status, reason, decided_at) VALUES (?, ?, ?, ?)",
+            (str(run_id), data.status, data.reason, now.isoformat()),
+        )
+        audit(db, organizer.id, "record_leaderboard_exclusion", str(run_id), now, data.model_dump_json())
+        return ExclusionDecision(**data.model_dump(), run_id=run_id, team_id=team_id, decided_at=now)
+
+
+def score_entry(db: Connection, team: Row, run: Row, report: Row, weight: int) -> tuple[Standing, list[str]]:
     rows = db.execute(ASSIGNMENT_QUERY + " WHERE a.report_id = ? ORDER BY a.id", (report["id"],)).fetchall()
     if not rows:
         raise ApiError(409, "REVIEWS_INCOMPLETE", "每份最新报告需要分配评委")
@@ -281,7 +353,7 @@ def score_entry(db: Connection, team, batch_id: str, weight: int) -> tuple[Stand
     report_score = points(Decimal(sum(scores)) / len(scores))
     total_score = points((quant_score * weight + report_score * (10_000 - weight)) / 10_000)
     return Standing(
-        rank=0, team_id=team_id, team_name=team["name"], net_return=net_return,
+        rank=0, team_id=team["id"], team_name=team["name"], net_return=net_return,
         quant_score=quant_score, report_score=report_score, total_score=total_score,
     ), sources
 
@@ -293,11 +365,28 @@ def snapshot(db: Connection) -> tuple[LeaderboardSnapshot, str]:
         raise ApiError(409, "OFFICIAL_RUNS_INCOMPLETE", "正式评测尚未完成")
     teams = db.execute("SELECT t.id, t.name FROM freeze_records f JOIN teams t ON t.id = f.team_id ORDER BY t.id")
     entries = []
+    unranked = []
     sources = []
     for team in teams:
-        entry, entry_sources = score_entry(db, team, batch["id"], settings.quant_weight_bps)
-        entries.append(entry)
-        sources.extend(entry_sources)
+        run = latest_official_run(db, batch["id"], team["id"])
+        if run is None or run["status"] in {"QUEUED", "RUNNING"}:
+            raise ApiError(409, "OFFICIAL_RUNS_INCOMPLETE", "全部冻结队伍需要完成正式评测")
+        if run["status"] == "FAILED":
+            if not confirmed_exclusion(db, run["id"], "OFFICIAL_RUN_FAILED"):
+                raise ApiError(409, "OFFICIAL_RUNS_INCOMPLETE", "失败的正式评测需重跑或由组织者登记无有效成绩")
+            status = "OFFICIAL_RUN_FAILED"
+        else:
+            report = latest_report(db, team["id"])
+            if report is not None:
+                entry, entry_sources = score_entry(db, team, run, report, settings.quant_weight_bps)
+                entries.append(entry)
+                sources.extend(entry_sources)
+                continue
+            if not confirmed_exclusion(db, run["id"], "REPORT_MISSING"):
+                raise ApiError(409, "REPORTS_INCOMPLETE", "缺交报告需由组织者登记")
+            status = "REPORT_MISSING"
+        unranked.append(UnrankedTeam(team_id=team["id"], team_name=team["name"], status=status))
+        sources.append(run["id"])
     entries.sort(key=lambda entry: (-entry.total_score, -entry.net_return, -entry.report_score, entry.team_id))
     rank = 0
     previous = None
@@ -307,8 +396,12 @@ def snapshot(db: Connection) -> tuple[LeaderboardSnapshot, str]:
             rank = index
         entries[index - 1] = entry.model_copy(update={"rank": rank})
         previous = tie
-    result = LeaderboardSnapshot(batch_id=batch["id"], quant_weight_bps=settings.quant_weight_bps, entries=entries)
-    fingerprint = sha256((result.model_dump_json() + "|" + "|".join(sources)).encode()).hexdigest()
+    result = LeaderboardSnapshot(
+        batch_id=batch["id"], quant_weight_bps=settings.quant_weight_bps, entries=entries, unranked=unranked,
+    )
+    # Preserve fingerprints for previews generated before the unranked field was added.
+    canonical = result.model_dump_json(exclude={"unranked"} if not unranked else None)
+    fingerprint = sha256((canonical + "|" + "|".join(sources)).encode()).hexdigest()
     return result, fingerprint
 
 
